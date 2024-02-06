@@ -8,8 +8,8 @@ import argparse
 
 from tqdm import tqdm
 
-from DTP_API.DTP_API import DTPApi
-from DTP_API.DTP_config import DTPConfig
+from DTP_API_DTC.DTP_API import DTPApi
+from DTP_API_DTC.DTP_config import DTPConfig
 
 
 class DeleteAsPerformed:

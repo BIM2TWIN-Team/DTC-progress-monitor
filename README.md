@@ -1,4 +1,4 @@
-# BIM2TWIN WP3 Progress Monitoring
+# WP3 Progress Monitoring with DTC Ontology
 
 This repo consist of scripts to create as-performed nodes like `action`, `operation` and `construction` in BIM2TWIN DTP
 and perform progress monitering at activity level.

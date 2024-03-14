@@ -16,6 +16,7 @@ from DTP_API_DTC.helpers import logger_global, get_timestamp_dtp_format, convert
 # assuming activity and operation has same start date
 activity_op_start = True
 
+
 class CreateAsPerformed:
     """
     The class is creates all as performed nodes except element level according to as-planned nodes
@@ -179,15 +180,18 @@ class CreateAsPerformed:
         if not self.__need_to_create_node(node_type='action', node_iri=action_iri):
             return action_iri, False
 
-        task_type = task_dict[self.DTP_CONFIG.get_ontology_uri('hasTaskType')]
+        classification_code = task_dict[self.DTP_CONFIG.get_ontology_uri('classificationCode')]
+        classification_system = task_dict[self.DTP_CONFIG.get_ontology_uri('classificationSystem')]
         contractor = task_dict[self.DTP_CONFIG.get_ontology_uri('constructionContractor')]
         if not process_start:
             process_start = task_dict[self.DTP_CONFIG.get_ontology_uri('plannedStart')]
         if not self.DTP_API.check_if_exist(action_iri):
-            create_res = self.DTP_API.create_action_node(task_type, action_iri, task_dict['_iri'], as_build_element_iri,
+            create_res = self.DTP_API.create_action_node(action_iri, classification_code, classification_system,
+                                                         task_dict['_iri'], as_build_element_iri,
                                                          contractor, process_start, process_end)
         else:
-            create_res = self.DTP_API.update_action_node(task_type, action_iri, task_dict['_iri'], as_build_element_iri,
+            create_res = self.DTP_API.update_action_node(action_iri, classification_code, classification_system,
+                                                         task_dict['_iri'], as_build_element_iri,
                                                          contractor, process_start, process_end)
 
         if create_res:
@@ -220,18 +224,19 @@ class CreateAsPerformed:
         if not self.__need_to_create_node(node_type='operation', node_iri=operation_iri):
             return operation_iri, False
 
-        task_type = activity[self.DTP_CONFIG.get_ontology_uri('hasTaskType')]
+        classification_code = activity[self.DTP_CONFIG.get_ontology_uri('classificationCode')]
+        classification_system = activity[self.DTP_CONFIG.get_ontology_uri('classificationSystem')]
         if not process_start:
             process_start = activity[self.DTP_CONFIG.get_ontology_uri('plannedStart')]
 
         if not self.DTP_API.check_if_exist(operation_iri):
-            create_res = self.DTP_API.create_operation_node(task_type, operation_iri, activity['_iri'],
-                                                            list_of_action_iri, process_start, last_updated,
-                                                            process_end)
+            create_res = self.DTP_API.create_operation_node(operation_iri, classification_code, classification_system,
+                                                            activity['_iri'], list_of_action_iri, process_start,
+                                                            last_updated, process_end)
         else:
-            create_res = self.DTP_API.update_operation_node(task_type, operation_iri, activity['_iri'],
-                                                            list_of_action_iri, process_start, last_updated,
-                                                            process_end)
+            create_res = self.DTP_API.update_operation_node(operation_iri, classification_code, classification_system,
+                                                            activity['_iri'], list_of_action_iri, process_start,
+                                                            last_updated, process_end)
 
         if create_res:
             return operation_iri, True
@@ -258,13 +263,10 @@ class CreateAsPerformed:
         if not self.__need_to_create_node(node_type='construction', node_iri=constr_iri):
             return constr_iri, False
 
-        production_method_type = work_package[self.DTP_CONFIG.get_ontology_uri('hasProductionMethodType')]
         if not self.DTP_API.check_if_exist(constr_iri):
-            query_res = self.DTP_API.create_construction_node(production_method_type, constr_iri, work_package['_iri'],
-                                                              list_of_operation_iri)
+            query_res = self.DTP_API.create_construction_node(constr_iri, work_package['_iri'], list_of_operation_iri)
         else:
-            query_res = self.DTP_API.update_construction_node(production_method_type, constr_iri, work_package['_iri'],
-                                                              list_of_operation_iri)
+            query_res = self.DTP_API.update_construction_node(constr_iri, work_package['_iri'], list_of_operation_iri)
 
         if query_res:
             return constr_iri, True
@@ -379,7 +381,8 @@ def parse_args():
     Get parameters from user
     """
     parser = argparse.ArgumentParser(description='Create as-performed nodes in DTP graph')
-    parser.add_argument('--xml_path', '-x', type=str, help='path to config xml file', default='DTP_API/DTP_config.xml')
+    parser.add_argument('--xml_path', '-x', type=str, help='path to config xml file',
+                        default='DTP_API_DTC/DTP_config.xml')
     parser.add_argument('--simulation', '-s', default=False, action='store_true')
     parser.add_argument('--force_update', default=False, action='store_true',
                         help='if set, nodes will be force to update even if its already exist in DTP')

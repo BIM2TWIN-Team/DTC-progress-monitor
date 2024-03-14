@@ -352,7 +352,8 @@ def parse_args():
     Get parameters from user
     """
     parser = argparse.ArgumentParser(description='Perform progress monitoring with DTP graph')
-    parser.add_argument('--xml_path', '-x', type=str, help='path to config xml file', default='DTP_API/DTP_config.xml')
+    parser.add_argument('--xml_path', '-x', type=str, help='path to config xml file',
+                        default='DTP_API_DTC/DTP_config.xml')
     parser.add_argument('--simulation', '-s', default=False, action='store_true')
 
     return parser.parse_args()

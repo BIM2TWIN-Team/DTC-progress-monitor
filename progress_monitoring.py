@@ -377,10 +377,7 @@ class ProgressMonitor:
                 total_tasks += len(activity['status'])
 
                 behind_index = [i for i, x in enumerate(activity['status']) if x == 'behind']
-                if activity_status(activity['status']) == 'behind':
-                    behind_activity_list.append(1)
-                else:
-                    behind_activity_list.append(0)
+                behind_activity_list += [1] if activity_status(activity['status']) == 'behind' else [0]
 
                 if len(behind_index) == 1:
                     behind_days += activity['days']

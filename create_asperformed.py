@@ -13,9 +13,6 @@ from DTP_API_DTC.DTP_config import DTPConfig
 from DTP_API_DTC.helpers import logger_global, get_timestamp_dtp_format, convert_str_dtp_format_datetime, \
     create_as_performed_iri
 
-# assuming activity and operation has same start date
-activity_op_start = True
-
 
 class CreateAsPerformed:
     """
@@ -322,16 +319,6 @@ class CreateAsPerformed:
                         action_list.append(1)
 
                     element_end_time = as_perf_node[self.DTP_CONFIG.get_ontology_uri('timeStamp')]
-
-                    # assuming operation and activity has same start date
-                    if not activity_op_start:
-                        # start date for both operation and action will be same
-                        if not operation_first_updated:  # if operation start date is not set
-                            operation_first_updated = element_end_time
-                        else:  # get the oldest end date
-                            operation_first_updated = get_timestamp_dtp_format(
-                                min(convert_str_dtp_format_datetime(operation_first_updated),
-                                    convert_str_dtp_format_datetime(element_end_time)))
 
                     # end date for both operation and action will be same
                     if not operation_last_updated:  # if operation end date is not set

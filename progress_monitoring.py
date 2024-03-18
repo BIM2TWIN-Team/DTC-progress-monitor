@@ -134,7 +134,7 @@ def calculate_projection(activity_tracker, activity_iri):
 
 class ProgressMonitor:
 
-    def __init__(self, dtp_config, dtp_api):
+    def __init__(self, dtp_config, dtp_api, kpi):
         """
         Parameters
         ----------
@@ -142,9 +142,12 @@ class ProgressMonitor:
             an instance of DTP_Config
         dtp_api : DTP_Api, obligatory
             an instance of DTP_Api
+        kpi : obligatory
+            a flag to calculate kpis or not
         """
         self.DTP_CONFIG = dtp_config
         self.DTP_API = dtp_api
+        self.kpi = kpi
         self.progress_at_activity = dict()
 
     def __get_progress_from_as_performed_node(self, node):
@@ -344,7 +347,55 @@ class ProgressMonitor:
 
             self.compute_progress(activity_tracker, each_activity['_iri'], progress_at_activity)
 
+        if self.kpi:
+            self.kpi_calculator(activity_tracker)
+
         return progress_at_activity
+
+    def kpi_calculator(self, activity_tracker):
+        wp_tracker = dict()
+        kpi1 = dict()  # percentage of delayed task per work package
+        kpi2 = dict()  # percentage of delayed days per work package
+        kpi3 = dict()  # percentage of delayed activities per work package
+
+        # go up from activity to workpackage level
+        for activity_iri in activity_tracker:
+            wp_iri = self.DTP_API.fetch_workpackage_of_activity_node(activity_iri)['items'][0]['_iri']
+            if wp_iri not in wp_tracker:
+                wp_tracker[wp_iri] = []
+            wp_tracker[wp_iri].append(activity_tracker[activity_iri])
+
+        print("Calculating KPIs...")
+        for wp_iri, activity_list in wp_tracker.items():
+            behind_tasks = 0
+            total_tasks = 0
+            behind_days = 0
+            planned_days = 0
+            behind_activity_list = []
+            for activity in activity_list:
+                behind_tasks += activity['status'].count('behind')
+                total_tasks += len(activity['status'])
+
+                behind_index = [i for i, x in enumerate(activity['status']) if x == 'behind']
+                if activity_status(activity['status']) == 'behind':
+                    behind_activity_list.append(1)
+                else:
+                    behind_activity_list.append(0)
+
+                if len(behind_index) == 1:
+                    behind_days += activity['days']
+                else:
+                    behind_days_list = [activity['days'][i] for i in behind_index]
+                    behind_days += sum(behind_days_list)
+                planned_days += activity['planned_days']
+
+            kpi1[wp_iri] = behind_tasks / total_tasks
+            kpi2[wp_iri] = behind_days / planned_days
+            kpi3[wp_iri] = sum(behind_activity_list) / len(behind_activity_list)
+
+        print(kpi1)
+        print(kpi2)
+        print(kpi3)
 
 
 def parse_args():
@@ -355,6 +406,7 @@ def parse_args():
     parser.add_argument('--xml_path', '-x', type=str, help='path to config xml file',
                         default='DTP_API_DTC/DTP_config.xml')
     parser.add_argument('--simulation', '-s', default=False, action='store_true')
+    parser.add_argument('--kpis', '-k', default=False, action='store_true')
 
     return parser.parse_args()
 
@@ -363,7 +415,7 @@ if __name__ == "__main__":
     args = parse_args()
     dtp_config = DTPConfig(args.xml_path)
     dtp_api = DTPApi(dtp_config, simulation_mode=args.simulation)
-    progress_monitor = ProgressMonitor(dtp_config, dtp_api)
+    progress_monitor = ProgressMonitor(dtp_config, dtp_api, args.kpis)
     progress_dict = progress_monitor.compute_progress_at_activity()
     for activity_iri, progress in progress_dict.items():
         print(activity_iri, progress)

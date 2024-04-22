@@ -150,7 +150,7 @@ class ProgressMonitor:
         self.kpi = kpi
         self.progress_at_activity = dict()
 
-    def __get_progress_from_as_performed_node(self, node):
+    def __get_progress_from_as_built_node(self, node):
         """
         Get progress of each as-performed node
 
@@ -303,8 +303,11 @@ class ProgressMonitor:
 
         print("Started progress monitering...")
         for each_activity in tqdm(activities['items']):
+            # days: activity end date - operation end date (ahead/behind days)
+            # planned_days: operation end date - operation start date
+            # planned_days: activity end date - activity start date
             activity_tracker[each_activity['_iri']] = {'complete': [], 'status': [], 'days': [], 'planned_days': 0,
-                                                       'perf_days': 0}
+                                                       'perf_days': 0, 'days_kpi': []}
             operation_resp = self.__get_as_performed_op_node(each_activity)
             activity_start_time, activity_end_time = self.get_time(each_activity, as_planned=True)
             planned_days = (activity_end_time - activity_start_time).days
@@ -320,12 +323,16 @@ class ProgressMonitor:
                     activity_tracker[each_activity['_iri']]['status'].append('on')
                     day_diff = (activity_start_time - latest_scan_date).days
                 activity_tracker[each_activity['_iri']]['days'] = day_diff
+                activity_tracker[each_activity['_iri']][
+                    'days_kpi'] = day_diff - planned_days if day_diff > planned_days else planned_days - day_diff
                 self.compute_progress(activity_tracker, each_activity['_iri'], progress_at_activity)
                 continue
 
             operation = operation_resp['items'][0]
             operation_start_time, operation_end_time = self.get_time(operation, as_planned=False)
             perf_days = (operation_end_time - operation_start_time).days
+            activity_tracker[each_activity['_iri']]['operation_start_time'] = operation_start_time
+            activity_tracker[each_activity['_iri']]['operation_end_time'] = operation_end_time
             activity_tracker[each_activity['_iri']]['perf_days'] = perf_days
 
             tasks = self.DTP_API.query_all_pages(self.DTP_API.fetch_activity_connected_task_nodes,
@@ -336,13 +343,14 @@ class ProgressMonitor:
                 if not as_performed_element['size']:  # if as-planned node doesn't have an as-performed node
                     continue
 
-                as_performed_status = self.__get_progress_from_as_performed_node(as_performed_element)
+                as_performed_status = self.__get_progress_from_as_built_node(as_performed_element)
                 time_status, days, task_complete_flag = check_schedule(activity_start_time, activity_end_time,
                                                                        operation_start_time, operation_end_time,
                                                                        as_performed_status)
 
                 activity_tracker[each_activity['_iri']]['complete'].append(task_complete_flag)
                 activity_tracker[each_activity['_iri']]['days'].append(days)
+                activity_tracker[each_activity['_iri']]['days_kpi'].append(days)
                 activity_tracker[each_activity['_iri']]['status'].append(time_status)
 
             self.compute_progress(activity_tracker, each_activity['_iri'], progress_at_activity)
@@ -352,47 +360,61 @@ class ProgressMonitor:
 
         return progress_at_activity
 
-    def kpi_calculator(self, activity_tracker):
-        wp_tracker = dict()
-        kpi1 = dict()  # percentage of delayed task per work package
-        kpi2 = dict()  # percentage of delayed days per work package
-        kpi3 = dict()  # percentage of delayed activities per work package
+    def compute_progress_at_wp(self, activity_tracker=None):
+        """
+        Compute progress at work package level
 
-        # go up from activity to workpackage level
+        Parameters
+        ----------
+        activity_tracker: dict
+            Dictionary containing progress at activity
+        Returns
+        -------
+        dict
+            Dictionary containing progress at work package
+        """
+        wp_tracker = dict()
         for activity_iri in activity_tracker:
             wp_iri = self.DTP_API.fetch_workpackage_of_activity_node(activity_iri)['items'][0]['_iri']
             if wp_iri not in wp_tracker:
                 wp_tracker[wp_iri] = []
             wp_tracker[wp_iri].append(activity_tracker[activity_iri])
 
+        return wp_tracker
+
+    def kpi_calculator(self, activity_tracker):
+        kpi1 = dict()  # percentage of delayed days per work package
+        kpi2 = dict()  # percentage of delayed activities per work package
+
+        # go up from activity to work package level
+        wp_tracker = self.compute_progress_at_wp(activity_tracker)
+
         print("Calculating KPIs...")
         for wp_iri, activity_list in wp_tracker.items():
-            behind_tasks = 0
-            total_tasks = 0
             behind_days = 0
             planned_days = 0
             behind_activity_list = []
             for activity in activity_list:
-                behind_tasks += activity['status'].count('behind')
-                total_tasks += len(activity['status'])
 
                 behind_index = [i for i, x in enumerate(activity['status']) if x == 'behind']
                 behind_activity_list += [1] if activity_status(activity['status']) == 'behind' else [0]
 
-                if len(behind_index) == 1:
-                    behind_days += activity['days']
-                else:
-                    behind_days_list = [activity['days'][i] for i in behind_index]
-                    behind_days += sum(behind_days_list)
                 planned_days += activity['planned_days']
+                if len(behind_index) == 1:
+                    behind_days += activity['days_kpi']
+                else:
+                    behind_days_list = [activity['days_kpi'][i] for i in behind_index]
+                    behind_days += sum(behind_days_list)
 
-            kpi1[wp_iri] = behind_tasks / total_tasks
-            kpi2[wp_iri] = behind_days / planned_days
-            kpi3[wp_iri] = sum(behind_activity_list) / len(behind_activity_list)
+            kpi1[wp_iri] = 0 if behind_days == 0 else planned_days / behind_days
+            kpi2[wp_iri] = sum(behind_activity_list) / len(behind_activity_list)
 
-        print(kpi1)
-        print(kpi2)
-        print(kpi3)
+        print("KPI 1: percentage of delayed days per work package")
+        for wp_iri, kpi_value in kpi1.items():
+            print(wp_iri, kpi_value)
+        print("KPI 2: percentage of delayed activities per work package")
+        for wp_iri, kpi_value in kpi2.items():
+            print(wp_iri, kpi_value)
 
 
 def parse_args():
@@ -414,5 +436,5 @@ if __name__ == "__main__":
     dtp_api = DTPApi(dtp_config, simulation_mode=args.simulation)
     progress_monitor = ProgressMonitor(dtp_config, dtp_api, args.kpis)
     progress_dict = progress_monitor.compute_progress_at_activity()
-    for activity_iri, progress in progress_dict.items():
-        print(activity_iri, progress)
+    # for activity_iri, progress in progress_dict.items():
+    #     print(activity_iri, progress)

@@ -5,6 +5,7 @@
 # This file cannot be used without a written permission from the author(s).
 
 import argparse
+from datetime import datetime
 
 from tqdm import tqdm
 
@@ -47,6 +48,28 @@ class CreateAsPerformed:
         self.force_update = force_update
         self.as_planned_dict = dict()
         self.created_nodes_iri = {'action': set(), 'operation': set(), 'construction': set()}
+        self.updated_nodes_iri = {'action': set(), 'operation': set(), 'construction': set()}
+
+    def __get_scan_date(self):
+        """
+        Get latest scan date from operation node
+
+        Returns
+        -------
+        datetime
+            Returns the latest scan date
+        """
+        scan_date = None
+        operations = self.DTP_API.query_all_pages(self.DTP_API.fetch_op_nodes)
+        assert operations['size'], "No operation nodes found!"
+        for operation in operations['items']:
+            last_updated = operation[self.DTP_CONFIG.get_ontology_uri('lastUpdatedOn')]
+            if not scan_date:  # if scan date is not set
+                scan_date = last_updated
+            else:  # get the latest scan date
+                scan_date = get_timestamp_dtp_format(max(convert_str_dtp_format_datetime(scan_date),
+                                                         convert_str_dtp_format_datetime(last_updated)))
+        return datetime.fromisoformat(scan_date)
 
     def __get_all_work_packages(self):
         """
@@ -113,7 +136,7 @@ class CreateAsPerformed:
         self.__get_tasks_for_activities()
         self.__get_element_for_tasks()
 
-    def __need_to_create_node(self, node_type, node_iri):
+    def __need_to_create_node(self, node_type, node_iri, force_update):
         """
         Check if the node needs to be created or not
 
@@ -123,6 +146,8 @@ class CreateAsPerformed:
             Node type
         node_iri: str
             Node iri
+        force_update: bool
+            if set update node
 
         Returns
         -------
@@ -130,7 +155,7 @@ class CreateAsPerformed:
             return True if node need to be created else false
         """
         assert node_type in self.created_nodes_iri.keys(), f"Wrong node type '{node_type}'"
-        if self.force_update:
+        if force_update:
             return True
 
         return False if node_iri in self.created_nodes_iri[node_type] or self.DTP_API.check_if_exist(
@@ -155,7 +180,8 @@ class CreateAsPerformed:
         else:
             return True if sum(actions_completed) / len(actions_completed) == 1 else False
 
-    def __create_action(self, task_dict, as_build_element_iri, process_start=None, process_end=None):
+    def __create_action(self, task_dict, as_build_element_iri=None, process_start=None, process_end=None,
+                        force_update=False):
         """
         Create as-performed action node
 
@@ -174,7 +200,7 @@ class CreateAsPerformed:
             return iri of the newly created action node
         """
         action_iri = create_as_performed_iri(task_dict['_iri'])
-        if not self.__need_to_create_node(node_type='action', node_iri=action_iri):
+        if not self.__need_to_create_node(node_type='action', node_iri=action_iri, force_update=force_update):
             return action_iri, False
 
         classification_code = task_dict[self.DTP_CONFIG.get_ontology_uri('classificationCode')]
@@ -197,7 +223,7 @@ class CreateAsPerformed:
             raise Exception(f"Error creating action node {action_iri}")
 
     def __create_operation(self, activity, list_of_action_iri=None, process_start=None, last_updated=None,
-                           process_end=None):
+                           process_end=None, force_update=False):
         """
         Create as-performed operation node
 
@@ -218,7 +244,7 @@ class CreateAsPerformed:
             return iri of the newly created operation node
         """
         operation_iri = create_as_performed_iri(activity['_iri'])
-        if not self.__need_to_create_node(node_type='operation', node_iri=operation_iri):
+        if not self.__need_to_create_node(node_type='operation', node_iri=operation_iri, force_update=force_update):
             return operation_iri, False
 
         classification_code = activity[self.DTP_CONFIG.get_ontology_uri('classificationCode')]
@@ -240,7 +266,7 @@ class CreateAsPerformed:
         else:
             raise Exception(f"Error creating operation node {operation_iri}")
 
-    def __create_construction(self, work_package, list_of_operation_iri=None):
+    def __create_construction(self, work_package, list_of_operation_iri=None, force_update=False):
         """
         Create as-performed construction node
 
@@ -257,7 +283,7 @@ class CreateAsPerformed:
             return iri of the newly created construction node
         """
         constr_iri = create_as_performed_iri(work_package['_iri'])
-        if not self.__need_to_create_node(node_type='construction', node_iri=constr_iri):
+        if not self.__need_to_create_node(node_type='construction', node_iri=constr_iri, force_update=force_update):
             return constr_iri, False
 
         if not self.DTP_API.check_if_exist(constr_iri):
@@ -354,13 +380,37 @@ class CreateAsPerformed:
             if each_wp['size']:  # if zero, no work package nodes
                 construction_iri, construction_created = self.__create_construction(each_wp, concerned_operation_iris)
                 if construction_created:
-                    self.created_nodes_iri['operation'].add(construction_iri)
+                    self.created_nodes_iri['construction'].add(construction_iri)
 
-        print("Finished creating as-performed in DTP.")
+        print("Finished initial creating as-performed in DTP.")
 
-        return {'action': len(self.created_nodes_iri['action']),
-                'operation': len(self.created_nodes_iri['operation']),
-                'construction': len(self.created_nodes_iri['construction'])}
+        # check pre-condition nodes
+        print("Check pre-condition nodes...")
+        latest_scan_date = self.__get_scan_date()
+        for each_wp in tqdm(self.as_planned_dict['work_package']):
+            if self.DTP_API.fetch_construction_required_process(each_wp['_iri'])['size']:
+                for each_activity in each_wp['activity']:
+                    operation_iri, operation_updated = self.__create_operation(activity=each_activity,
+                                                                               process_end=latest_scan_date,
+                                                                               force_update=True)
+                    if operation_updated:
+                        self.updated_nodes_iri['operation'].add(operation_iri)
+                    for each_task in each_activity['task']:
+                        action_iri, action_updated = self.__create_action(task_dict=each_task,
+                                                                          process_end=latest_scan_date,
+                                                                          force_update=True)
+                        if action_updated:
+                            self.updated_nodes_iri['action'].add(action_iri)
+
+        print("Finished creating/updating as-performed in DTP.")
+
+        return {'created action': len(self.created_nodes_iri['action']),
+                'created operation': len(self.created_nodes_iri['operation']),
+                'created construction': len(self.created_nodes_iri['construction']),
+                'updated action': len(self.updated_nodes_iri['action']),
+                'updated operation': len(self.updated_nodes_iri['operation']),
+                'updated construction': len(self.updated_nodes_iri['construction']),
+                }
 
 
 def parse_args():
@@ -385,5 +435,5 @@ if __name__ == "__main__":
     dtp_api = DTPApi(dtp_config, simulation_mode=args.simulation)
     as_performed = CreateAsPerformed(dtp_config, dtp_api, args.force_update)
     count_created_nodes = as_performed.create_as_performed_nodes()
-    print(f"Created {count_created_nodes['construction']} construction, {count_created_nodes['operation']} "
-          f"operation and {count_created_nodes['action']} action nodes.")
+    for key, item in count_created_nodes.items():
+        print(f"{key}: {item}")

@@ -51,7 +51,7 @@ def get_num_days(each_activity_tracker, computed_status):
         for idx, status in enumerate(each_activity_tracker['status']):
             if status == computed_status:
                 num_days_list.append(each_activity_tracker['days'][idx])
-        return max(num_days_list)
+        return max(num_days_list) if len(num_days_list) else 0
     else:  # no actions for operation
         return each_activity_tracker['days']
 
@@ -266,7 +266,10 @@ class ProgressMonitor:
             Dictionary to store progress
         """
         num_task = len(activity_tracker[activity_iri]['complete'])
-        computed_complete = sum(activity_tracker[activity_iri]['complete']) / num_task * 100
+        if num_task:
+            computed_complete = sum(activity_tracker[activity_iri]['complete']) / num_task * 100
+        else:
+            computed_complete = 0
         computed_status = activity_status(activity_tracker[activity_iri]['status'])
         computed_num_days = get_num_days(activity_tracker[activity_iri], computed_status)
 

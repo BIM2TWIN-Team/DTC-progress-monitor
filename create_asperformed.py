@@ -69,7 +69,7 @@ class CreateAsPerformed:
             else:  # get the latest scan date
                 scan_date = get_timestamp_dtp_format(max(convert_str_dtp_format_datetime(scan_date),
                                                          convert_str_dtp_format_datetime(last_updated)))
-        return datetime.fromisoformat(scan_date)
+        return scan_date
 
     def __get_all_work_packages(self):
         """
@@ -364,7 +364,7 @@ class CreateAsPerformed:
                         self.created_nodes_iri['action'].add(action_iri)
 
                 # create corresponding operation node
-                if each_activity['size'] and operation_last_updated:  # if task and element nodes exist
+                if len(concerned_action_iris):  # if zero, no task started
                     # set end date if operation is complete
                     operation_end_time = operation_last_updated if self.__check_op_complete(action_list) else None
 
@@ -377,7 +377,7 @@ class CreateAsPerformed:
                         self.created_nodes_iri['operation'].add(operation_iri)
 
             # create corresponding construction node
-            if each_wp['size']:  # if zero, no work package nodes
+            if len(concerned_operation_iris):  # if zero, no operation started
                 construction_iri, construction_created = self.__create_construction(each_wp, concerned_operation_iris)
                 if construction_created:
                     self.created_nodes_iri['construction'].add(construction_iri)
@@ -391,6 +391,7 @@ class CreateAsPerformed:
             if self.DTP_API.fetch_construction_required_process(each_wp['_iri'])['size']:
                 for each_activity in each_wp['activity']:
                     operation_iri, operation_updated = self.__create_operation(activity=each_activity,
+                                                                               last_updated=latest_scan_date,
                                                                                process_end=latest_scan_date,
                                                                                force_update=True)
                     if operation_updated:

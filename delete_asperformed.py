@@ -72,7 +72,8 @@ def parse_args():
                         default='DTP_API_DTC/DTP_config.xml')
     parser.add_argument('--simulation', '-s', default=False, action='store_true')
     parser.add_argument('--target_level', '-t', type=str, choices=['construction', 'operation', 'action', 'all'],
-                        help='node level to be deleted', required=True)
+                        help='node level to be deleted')
+    parser.add_argument('--revert', '-t', type=str, help='path to session log file')
 
     return parser.parse_args()
 
@@ -81,15 +82,21 @@ if __name__ == "__main__":
     args = parse_args()
     dtp_config = DTPConfig(args.xml_path)
     dtp_api = DTPApi(dtp_config, simulation_mode=args.simulation)
-    delete_as_performed = DeleteAsPerformed(dtp_config, dtp_api)
-    if args.target_level in ['construction', 'all']:
-        delete_as_performed.delete_asperf_nodes('construction')
-    if args.target_level in ['operation', 'all']:
-        delete_as_performed.delete_asperf_nodes('operation')
-    if args.target_level in ['action', 'all']:
-        delete_as_performed.delete_asperf_nodes('action')
+    if not args.revert:
+        assert args.target_level, "Target level param need!"
+        delete_as_performed = DeleteAsPerformed(dtp_config, dtp_api)
+        if args.target_level in ['construction', 'all']:
+            delete_as_performed.delete_asperf_nodes('construction')
+        if args.target_level in ['operation', 'all']:
+            delete_as_performed.delete_asperf_nodes('operation')
+        if args.target_level in ['action', 'all']:
+            delete_as_performed.delete_asperf_nodes('action')
 
-    print(f"Deleted "
-          f"{delete_as_performed.deleted_nodes_num['construction']} construction, "
-          f"{delete_as_performed.deleted_nodes_num['operation']} operation and "
-          f"{delete_as_performed.deleted_nodes_num['action']} action nodes.")
+        print(f"Deleted "
+              f"{delete_as_performed.deleted_nodes_num['construction']} construction, "
+              f"{delete_as_performed.deleted_nodes_num['operation']} operation and "
+              f"{delete_as_performed.deleted_nodes_num['action']} action nodes.")
+    else:
+        print(f'Reverting session from {args.revert}')
+        dtp_api.revert_last_session(args.revert)
+        print(f'Session Reverted.')

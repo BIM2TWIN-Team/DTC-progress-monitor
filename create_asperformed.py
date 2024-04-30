@@ -47,8 +47,9 @@ class CreateAsPerformed:
         self.DTP_API = dtp_api
         self.force_update = force_update
         self.as_planned_dict = dict()
+        self.precondition_rule = True
         self.created_nodes_iri = {'action': set(), 'operation': set(), 'construction': set()}
-        self.updated_nodes_iri = {'action': set(), 'operation': set(), 'construction': set()}
+        self.updated_nodes_iri = {'asbuilt': set(), 'action': set(), 'operation': set(), 'construction': set()}
 
     def __get_scan_date(self):
         """
@@ -179,6 +180,70 @@ class CreateAsPerformed:
             return False
         else:
             return True if sum(actions_completed) / len(actions_completed) == 1 else False
+
+    def __update_asbuilt(self, action_node_iri, timestamp=None, progress=None):
+        """
+        Create as-performed action node
+
+        Parameters
+        ----------
+        action_node_iri
+            Action node iri
+        timestamp
+            associated timestamp
+        progress
+            percentage of the as-built element
+
+        Returns
+        -------
+        str
+            return iri of the updated as-built node
+        """
+        asbuilt_nodes = self.DTP_API.fetch_action_connected_asbuilt_nodes(action_node_iri)
+        if asbuilt_nodes['size']:
+            # as-built node found connected to action
+            asbuilt_iri = asbuilt_nodes['items'][0]['_iri']
+            asplanned_iri = asbuilt_iri.replace('/asbuilt_', '/')
+            # checking if as-built node need update
+            node = self.DTP_API.fetch_node_with_iri(asbuilt_iri)['items'][0]
+            node_progress = node[self.DTP_CONFIG.get_ontology_uri('progress')]
+            node_timestamp = node[self.DTP_CONFIG.get_ontology_uri('timeStamp')]
+            node_target_edge = node["_outE"][0]["_targetIRI"]
+            if node_progress == progress and node_timestamp == timestamp and node_target_edge == asplanned_iri:
+                update_res = True
+            else:
+                update_res = self.DTP_API.update_asbuilt_node(asbuilt_iri, progress=progress, timestamp=timestamp,
+                                                              target_iri=asplanned_iri)
+        else:
+            # as-built node not found connected to action
+            task_iri = action_node_iri.replace('/action', '/task')
+            as_planned_node = self.DTP_API.fetch_task_connected_asdesigned_nodes(task_iri)['items'][0]
+            asbuilt_iri = create_as_performed_iri(as_planned_node['_iri'])
+            # work around to find as-built type
+            as_planned_node['_classes'].remove(self.DTP_CONFIG.get_ontology_uri('classElement'))
+            if self.DTP_API.check_if_exist(asbuilt_iri):
+                # checking if as-built node need update
+                node = self.DTP_API.fetch_node_with_iri(asbuilt_iri)['items'][0]
+                node_progress = node[self.DTP_CONFIG.get_ontology_uri('progress')]
+                node_timestamp = node[self.DTP_CONFIG.get_ontology_uri('timeStamp')]
+                node_target_edge = node["_outE"]["_targetIRI"]
+                if node_progress == progress and node_timestamp == timestamp and node_target_edge == as_planned_node[
+                    "_iri"]:
+                    update_res = True
+                else:
+                    update_res = self.DTP_API.update_asbuilt_node(asbuilt_iri, progress=progress, timestamp=timestamp,
+                                                                  target_iri=as_planned_node["_iri"])
+            else:
+                # if not found create
+                update_res = self.DTP_API.create_asbuilt_node(element_iri_uri=asbuilt_iri, progress=progress,
+                                                              timestamp=timestamp,
+                                                              element_type=as_planned_node['_classes'][0],
+                                                              target_iri=as_planned_node["_iri"])
+
+        if update_res:
+            return asbuilt_iri, True
+        else:
+            raise Exception(f"Error updating/creating as-built node {asbuilt_iri}")
 
     def __create_action(self, task_dict, as_build_element_iri=None, process_start=None, process_end=None,
                         force_update=False):
@@ -382,32 +447,52 @@ class CreateAsPerformed:
                 if construction_created:
                     self.created_nodes_iri['construction'].add(construction_iri)
 
-        print("Finished initial creating as-performed in DTP.")
+        print("Finished initial creating as-performed nodes in DTP.")
 
         # check pre-condition nodes
-        print("Check pre-condition nodes...")
-        latest_scan_date = self.__get_scan_date()
-        for each_wp in tqdm(self.as_planned_dict['work_package']):
-            if self.DTP_API.fetch_construction_required_process(each_wp['_iri'])['size']:
-                for each_activity in each_wp['activity']:
-                    operation_iri, operation_updated = self.__create_operation(activity=each_activity,
-                                                                               last_updated=latest_scan_date,
-                                                                               process_end=latest_scan_date,
-                                                                               force_update=True)
-                    if operation_updated:
-                        self.updated_nodes_iri['operation'].add(operation_iri)
-                    for each_task in each_activity['task']:
-                        action_iri, action_updated = self.__create_action(task_dict=each_task,
-                                                                          process_end=latest_scan_date,
-                                                                          force_update=True)
-                        if action_updated:
-                            self.updated_nodes_iri['action'].add(action_iri)
+        if self.precondition_rule:
+            print("Check pre-condition nodes...")
+            latest_scan_date = self.__get_scan_date()
+            for each_wp in tqdm(self.as_planned_dict['work_package']):
+                if self.DTP_API.fetch_construction_required_process(each_wp['_iri'])['size']:
+                    construction_iri, construction_updated = self.__create_construction(work_package=each_wp,
+                                                                                        force_update=False)
+                    if construction_updated:
+                        self.updated_nodes_iri['construction'].add(construction_iri)
+                    for each_activity in each_wp['activity']:
+                        operation_iri, operation_updated = self.__create_operation(activity=each_activity,
+                                                                                   last_updated=latest_scan_date,
+                                                                                   process_end=latest_scan_date,
+                                                                                   force_update=True)
+                        # link operation to construction
+                        operation_linked = self.DTP_API.link_node_constr_to_operation(constr_node_iri=construction_iri,
+                                                                                      list_of_operation_iri=[
+                                                                                          operation_iri])
 
-        print("Finished creating/updating as-performed in DTP.")
+                        if operation_updated and operation_linked:
+                            self.updated_nodes_iri['operation'].add(operation_iri)
+                        for each_task in each_activity['task']:
+                            action_iri, action_updated = self.__create_action(task_dict=each_task,
+                                                                              process_end=latest_scan_date,
+                                                                              force_update=True)
+                            # linking action to operation
+                            action_linked = self.DTP_API.link_node_operation_to_action(oper_node_iri=operation_iri,
+                                                                                       list_of_action_iri=[action_iri])
+                            if action_updated and action_linked:
+                                self.updated_nodes_iri['action'].add(action_iri)
+                            asbuilt_iri, asbuilt_updated = self.__update_asbuilt(action_node_iri=action_iri,
+                                                                                 timestamp=latest_scan_date,
+                                                                                 progress=100)
+                            # already asbuilt linked to action
+                            if asbuilt_updated:
+                                self.updated_nodes_iri['asbuilt'].add(asbuilt_iri)
+
+        print("Finished creating/updating as-performed nodes in DTP.")
 
         return {'created action': len(self.created_nodes_iri['action']),
                 'created operation': len(self.created_nodes_iri['operation']),
                 'created construction': len(self.created_nodes_iri['construction']),
+                'updated asbuilt': len(self.updated_nodes_iri['asbuilt']),
                 'updated action': len(self.updated_nodes_iri['action']),
                 'updated operation': len(self.updated_nodes_iri['operation']),
                 'updated construction': len(self.updated_nodes_iri['construction']),

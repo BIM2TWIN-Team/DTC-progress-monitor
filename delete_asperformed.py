@@ -73,7 +73,7 @@ def parse_args():
     parser.add_argument('--simulation', '-s', default=False, action='store_true')
     parser.add_argument('--target_level', '-t', type=str, choices=['construction', 'operation', 'action', 'all'],
                         help='node level to be deleted')
-    parser.add_argument('--revert', '-t', type=str, help='path to session log file')
+    parser.add_argument('--revert', '-r', type=str, help='path to session log file')
 
     return parser.parse_args()
 

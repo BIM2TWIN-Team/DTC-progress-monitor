@@ -314,10 +314,16 @@ class ProgressMonitor:
             operation_resp = self.__get_as_performed_op_node(each_activity)
             activity_start_time, activity_end_time = self.get_time(each_activity, as_planned=True)
             planned_days = (activity_end_time - activity_start_time).days
+            activity_tracker[each_activity['_iri']]['activity_start_time'] = activity_start_time
+            activity_tracker[each_activity['_iri']]['activity_end_time'] = activity_end_time
             activity_tracker[each_activity['_iri']]['planned_days'] = planned_days
 
             if not operation_resp['size']:  # if activity node doesn't have an operation node
                 activity_tracker[each_activity['_iri']]['complete'].append(0)
+                perf_days = (latest_scan_date - activity_start_time).days
+                activity_tracker[each_activity['_iri']]['operation_start_time'] = activity_start_time
+                activity_tracker[each_activity['_iri']]['operation_end_time'] = latest_scan_date
+                activity_tracker[each_activity['_iri']]['perf_days'] = perf_days
                 if activity_start_time < latest_scan_date:
                     # if operation needed to be started but not started yet
                     activity_tracker[each_activity['_iri']]['status'].append('behind')
@@ -395,21 +401,20 @@ class ProgressMonitor:
         print("Calculating KPIs...")
         for wp_iri, activity_list in wp_tracker.items():
             behind_days = 0
-            planned_days = 0
+            total_days = 0
             behind_activity_list = []
             for activity in activity_list:
 
-                behind_index = [i for i, x in enumerate(activity['status']) if x == 'behind']
-                behind_activity_list += [1] if activity_status(activity['status']) == 'behind' else [0]
-
-                planned_days += activity['planned_days']
-                if len(behind_index) == 1:
-                    behind_days += activity['days_kpi']
+                total_days += (activity['operation_end_time'] - activity['activity_start_time']).days  # total
+                # total_days += (activity['activity_end_time'] - activity['activity_start_time']).days  # planned
+                behind_days_check = (activity['operation_end_time'] - activity['activity_end_time']).days
+                if behind_days_check > 0:
+                    behind_days += behind_days_check
+                    behind_activity_list += [1]
                 else:
-                    behind_days_list = [activity['days_kpi'][i] for i in behind_index]
-                    behind_days += sum(behind_days_list)
+                    behind_activity_list += [0]
 
-            kpi1[wp_iri] = 0 if behind_days == 0 else planned_days / behind_days
+            kpi1[wp_iri] = 0 if behind_days == 0 else behind_days / total_days
             kpi2[wp_iri] = sum(behind_activity_list) / len(behind_activity_list)
 
         print("KPI 1: percentage of delayed days per work package")

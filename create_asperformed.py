@@ -159,8 +159,7 @@ class CreateAsPerformed:
         if force_update:
             return True
 
-        return False if node_iri in self.created_nodes_iri[node_type] or self.DTP_API.check_if_exist(
-            node_iri) else True
+        return False if node_iri in self.created_nodes_iri[node_type] else True
 
     def __check_op_complete(self, actions_completed):
         """
@@ -229,7 +228,7 @@ class CreateAsPerformed:
                 node_target_edge = node["_outE"]["_targetIRI"]
                 if node_progress == progress and node_timestamp == timestamp and node_target_edge == as_planned_node[
                     "_iri"]:
-                    update_res = True
+                    return asbuilt_iri, False
                 else:
                     update_res = self.DTP_API.update_asbuilt_node(asbuilt_iri, progress=progress, timestamp=timestamp,
                                                                   target_iri=as_planned_node["_iri"])
@@ -278,16 +277,33 @@ class CreateAsPerformed:
                                                          task_dict['_iri'], as_build_element_iri,
                                                          contractor, process_start, process_end)
         else:
-            create_res = self.DTP_API.update_action_node(action_iri, classification_code, classification_system,
-                                                         task_dict['_iri'], as_build_element_iri,
-                                                         contractor, process_start, process_end)
+            node = self.DTP_API.fetch_node_with_iri(action_iri)['items'][0]
+            node_class_code = node[self.DTP_CONFIG.get_ontology_uri('classificationCode')]
+            node_class_system = node[self.DTP_CONFIG.get_ontology_uri('classificationSystem')]
+            intent_status = None
+            all_edges = node["_outE"]
+            for edges in all_edges:
+                if edges["_label"] == self.DTP_CONFIG.get_ontology_uri('intentStatusRelation'):
+                    intent_status = edges['_targetIRI']
+                    all_edges.remove(edges)
+            node_start = node[self.DTP_CONFIG.get_ontology_uri('processStart')]
+            node_end = node[self.DTP_CONFIG.get_ontology_uri('processEnd')]
+
+            if (node_class_code == classification_code and node_class_system == classification_system and
+                    intent_status == task_dict['_iri'] and as_build_element_iri == all_edges and
+                    node_start == process_start and node_end == process_end):
+                return action_iri, False
+            else:
+                create_res = self.DTP_API.update_action_node(action_iri, classification_code, classification_system,
+                                                             task_dict['_iri'], as_build_element_iri,
+                                                             contractor, process_start, process_end)
 
         if create_res:
             return action_iri, True
         else:
             raise Exception(f"Error creating action node {action_iri}")
 
-    def __create_operation(self, activity, list_of_action_iri=None, process_start=None, last_updated=None,
+    def __create_operation(self, activity, set_of_action_iri=None, process_start=None, last_updated=None,
                            process_end=None, force_update=False):
         """
         Create as-performed operation node
@@ -296,8 +312,8 @@ class CreateAsPerformed:
         ----------
         activity:
             mirror activity node of operation
-        list_of_action_iri:
-            list of action node connected to this operation node
+        set_of_action_iri:
+            set of action node connected to this operation node
         last_updated:
             Last updated date
         process_end:
@@ -309,6 +325,7 @@ class CreateAsPerformed:
             return iri of the newly created operation node
         """
         operation_iri = create_as_performed_iri(activity['_iri'])
+        list_of_action_iri = sorted(list(set_of_action_iri)) if set_of_action_iri else None
         if not self.__need_to_create_node(node_type='operation', node_iri=operation_iri, force_update=force_update):
             return operation_iri, False
 
@@ -322,16 +339,40 @@ class CreateAsPerformed:
                                                             activity['_iri'], list_of_action_iri, process_start,
                                                             last_updated, process_end)
         else:
-            create_res = self.DTP_API.update_operation_node(operation_iri, classification_code, classification_system,
-                                                            activity['_iri'], list_of_action_iri, process_start,
-                                                            last_updated, process_end)
+            node = self.DTP_API.fetch_node_with_iri(operation_iri)['items'][0]
+            node_class_code = node[self.DTP_CONFIG.get_ontology_uri('classificationCode')]
+            node_class_system = node[self.DTP_CONFIG.get_ontology_uri('classificationSystem')]
+            intent_status_iri = None
+            all_edges = node["_outE"]
+            all_edges_iri = sorted([edge_dict["_targetIRI"] for edge_dict in all_edges])
+            for edges in all_edges:
+                if edges["_label"] == self.DTP_CONFIG.get_ontology_uri('intentStatusRelation'):
+                    intent_status_iri = edges['_targetIRI']
+                    all_edges_iri.remove(intent_status_iri)
+            if not all_edges_iri:
+                all_edges_iri = None
+            node_start = node[self.DTP_CONFIG.get_ontology_uri('processStart')]
+            node_last_updated = node[self.DTP_CONFIG.get_ontology_uri('lastUpdatedOn')]
+            node_end = None
+            if self.DTP_CONFIG.get_ontology_uri('processEnd') in node:
+                node_end = node[self.DTP_CONFIG.get_ontology_uri('processEnd')]
+
+            if (classification_code == node_class_code and classification_system == node_class_system and
+                    intent_status_iri == activity['_iri'] and all_edges_iri == list_of_action_iri
+                    and node_start == process_start and node_last_updated == last_updated and node_end == process_end):
+                return operation_iri, False
+            else:
+                create_res = self.DTP_API.update_operation_node(operation_iri, classification_code,
+                                                                classification_system,
+                                                                activity['_iri'], list_of_action_iri, process_start,
+                                                                last_updated, process_end)
 
         if create_res:
             return operation_iri, True
         else:
             raise Exception(f"Error creating operation node {operation_iri}")
 
-    def __create_construction(self, work_package, list_of_operation_iri=None, force_update=False):
+    def __create_construction(self, work_package, set_of_operation_iri=None, force_update=False):
         """
         Create as-performed construction node
 
@@ -339,8 +380,8 @@ class CreateAsPerformed:
         ----------
         work_package
             mirror work package node of operation
-        list_of_operation_iri
-            list of operation node connected to this construction node
+        set_of_operation_iri
+            set of operation node connected to this construction node
 
         Returns
         -------
@@ -348,13 +389,28 @@ class CreateAsPerformed:
             return iri of the newly created construction node
         """
         constr_iri = create_as_performed_iri(work_package['_iri'])
+        list_of_operation_iri = sorted(list(set_of_operation_iri)) if set_of_operation_iri else None
         if not self.__need_to_create_node(node_type='construction', node_iri=constr_iri, force_update=force_update):
             return constr_iri, False
 
         if not self.DTP_API.check_if_exist(constr_iri):
             query_res = self.DTP_API.create_construction_node(constr_iri, work_package['_iri'], list_of_operation_iri)
         else:
-            query_res = self.DTP_API.update_construction_node(constr_iri, work_package['_iri'], list_of_operation_iri)
+            node = self.DTP_API.fetch_node_with_iri(constr_iri)['items'][0]
+            intent_status_iri = None
+            all_edges = node["_outE"]
+            all_edges_iri = sorted([edge_dict["_targetIRI"] for edge_dict in all_edges])
+            for edges in all_edges:
+                if edges["_label"] == self.DTP_CONFIG.get_ontology_uri('intentStatusRelation'):
+                    intent_status_iri = edges['_targetIRI']
+                    all_edges_iri.remove(intent_status_iri)
+            if not all_edges_iri:
+                all_edges_iri = None
+            if intent_status_iri == work_package['_iri'] and list_of_operation_iri == all_edges_iri:
+                return constr_iri, False
+            else:
+                query_res = self.DTP_API.update_construction_node(constr_iri, work_package['_iri'],
+                                                                  list_of_operation_iri)
 
         if query_res:
             return constr_iri, True

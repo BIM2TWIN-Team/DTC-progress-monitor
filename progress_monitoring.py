@@ -419,10 +419,10 @@ class ProgressMonitor:
 
         print("KPI 1: percentage of delayed days per work package")
         for wp_iri, kpi_value in kpi1.items():
-            print(wp_iri, kpi_value)
+            print(wp_iri.replace(self.DTP_CONFIG.get_domain(), ""), kpi_value)
         print("KPI 2: percentage of delayed activities per work package")
         for wp_iri, kpi_value in kpi2.items():
-            print(wp_iri, kpi_value)
+            print(wp_iri.replace(self.DTP_CONFIG.get_domain(), ""), kpi_value)
 
 
 def parse_args():

@@ -554,7 +554,11 @@ class CreateAsPerformed:
             print("Check pre-condition nodes...")
             latest_scan_date = self.__get_scan_date()
             for each_wp in tqdm(self.as_planned_dict['work_package']):
+                if open('precondition_record.txt', 'r').read().find(f"{each_wp['_iri']}") > -1:
+                    continue
                 if self.DTP_API.fetch_construction_required_process(each_wp['_iri'])['size']:
+                    with open("precondition_record.txt", "a") as text_file:
+                        text_file.write(f"{latest_scan_date} {each_wp['_iri']}\n")
                     construction_iri, construction_updated = self.__create_construction(work_package=each_wp,
                                                                                         force_update=True)
                     if construction_updated:

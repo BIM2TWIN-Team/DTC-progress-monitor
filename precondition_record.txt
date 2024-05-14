@@ -1,0 +1,3 @@
+2022-03-15T00:00:00 http://bim2twin.eu/conslam_testing_5/workpackage1009
+2022-03-15T00:00:00 http://bim2twin.eu/conslam_testing_5/workpackage1002
+2022-03-15T00:00:00 http://bim2twin.eu/conslam_testing_5/workpackage1001

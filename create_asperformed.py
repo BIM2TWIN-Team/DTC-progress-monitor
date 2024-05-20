@@ -17,7 +17,7 @@ from DTP_API_DTC.helpers import logger_global, get_timestamp_dtp_format, convert
 
 class CreateAsPerformed:
     """
-    The class is creates all as performed nodes except element level according to as-planned nodes
+    The class creates all as performed nodes except element level according to as-planned nodes
 
     Attributes
     ----------
@@ -34,7 +34,7 @@ class CreateAsPerformed:
         dict, number of action, operation, and construction nodes created
     """
 
-    def __init__(self, dtp_config, dtp_api, force_update=False):
+    def __init__(self, dtp_config, dtp_api, force_update=False, dtp_sim=True):
         """
         Parameters
         ----------
@@ -47,7 +47,7 @@ class CreateAsPerformed:
         self.DTP_API = dtp_api
         self.force_update = force_update
         self.as_planned_dict = dict()
-        self.precondition_rule = True
+        self.precondition_rule = False if dtp_sim else True
         self.created_nodes_iri = {'action': set(), 'operation': set(), 'construction': set()}
         self.updated_nodes_iri = {'asbuilt': set(), 'action': set(), 'operation': set(), 'construction': set()}
 
@@ -64,6 +64,8 @@ class CreateAsPerformed:
         operations = self.DTP_API.query_all_pages(self.DTP_API.fetch_op_nodes)
         assert operations['size'], "No operation nodes found!"
         for operation in operations['items']:
+            if self.DTP_CONFIG.get_ontology_uri('lastUpdatedOn') not in operation:
+                continue
             last_updated = operation[self.DTP_CONFIG.get_ontology_uri('lastUpdatedOn')]
             if not scan_date:  # if scan date is not set
                 scan_date = last_updated
@@ -311,7 +313,7 @@ class CreateAsPerformed:
             if process_end:
                 condition += (node_end == process_end,)
 
-            if condition:
+            if all(condition):
                 return action_iri, False
             else:
                 create_res = self.DTP_API.update_action_node(action_iri, classification_code, classification_system,
@@ -392,9 +394,10 @@ class CreateAsPerformed:
             if process_end:
                 condition += (node_end == process_end,)
 
-            if condition:
+            if all(condition):
                 return operation_iri, False
             else:
+                print(node_last_updated, last_updated)
                 create_res = self.DTP_API.update_operation_node(operation_iri, classification_code,
                                                                 classification_system,
                                                                 activity['_iri'], list_of_action_iri, process_start,
@@ -450,7 +453,7 @@ class CreateAsPerformed:
             if list_of_operation_iri:
                 condition += (list_of_operation_iri == has_operation_edge,)
 
-            if condition:
+            if all(condition):
                 return constr_iri, False
             else:
                 query_res = self.DTP_API.update_construction_node(constr_iri, work_package['_iri'],
@@ -536,14 +539,16 @@ class CreateAsPerformed:
                     operation_iri, operation_created = self.__create_operation(each_activity, concerned_action_iris,
                                                                                operation_first_updated,
                                                                                operation_last_updated,
-                                                                               operation_end_time)
+                                                                               operation_end_time,
+                                                                               force_update=True)
                     concerned_operation_iris.add(operation_iri)
                     if operation_created:
                         self.created_nodes_iri['operation'].add(operation_iri)
 
             # create corresponding construction node
             if len(concerned_operation_iris):  # if zero, no operation started
-                construction_iri, construction_created = self.__create_construction(each_wp, concerned_operation_iris)
+                construction_iri, construction_created = self.__create_construction(each_wp, concerned_operation_iris,
+                                                                                    force_update=True)
                 if construction_created:
                     self.created_nodes_iri['construction'].add(construction_iri)
 
@@ -555,9 +560,11 @@ class CreateAsPerformed:
             latest_scan_date = self.__get_scan_date()
             for each_wp in tqdm(self.as_planned_dict['work_package']):
                 if open('precondition_record.txt', 'r').read().find(f"{each_wp['_iri']}") > -1:
+                    print(f"Skipping, already finished {each_wp['_iri']}")
                     continue
                 if self.DTP_API.fetch_construction_required_process(each_wp['_iri'])['size']:
                     with open("precondition_record.txt", "a") as text_file:
+                        print(f"Recording triggered wp {each_wp['_iri']}")
                         text_file.write(f"{latest_scan_date} {each_wp['_iri']}\n")
                     construction_iri, construction_updated = self.__create_construction(work_package=each_wp,
                                                                                         force_update=True)
@@ -582,21 +589,19 @@ class CreateAsPerformed:
                             # linking action to operation
                             action_linked = self.DTP_API.link_node_operation_to_action(oper_node_iri=operation_iri,
                                                                                        list_of_action_iri=[action_iri])
+
                             if action_updated and action_linked:
                                 self.updated_nodes_iri['action'].add(action_iri)
-                            asbuilt_iri, asbuilt_updated = self.__update_asbuilt(action_node_iri=action_iri,
-                                                                                 timestamp=latest_scan_date,
-                                                                                 progress=100)
-                            # already asbuilt linked to action
-                            if asbuilt_updated:
-                                self.updated_nodes_iri['asbuilt'].add(asbuilt_iri)
+                            # as-built nodes are not updated as it may cause other issues
+
+        else:
+            print("NO pre-condition check!")
 
         print("Finished creating/updating as-performed nodes in DTP.")
 
         return {'created action': len(self.created_nodes_iri['action']),
                 'created operation': len(self.created_nodes_iri['operation']),
                 'created construction': len(self.created_nodes_iri['construction']),
-                'updated asbuilt': len(self.updated_nodes_iri['asbuilt']),
                 'updated action': len(self.updated_nodes_iri['action']),
                 'updated operation': len(self.updated_nodes_iri['operation']),
                 'updated construction': len(self.updated_nodes_iri['construction']),
@@ -623,7 +628,7 @@ if __name__ == "__main__":
         print('Running in the simulator mode.')
     dtp_config = DTPConfig(args.xml_path)
     dtp_api = DTPApi(dtp_config, simulation_mode=args.simulation)
-    as_performed = CreateAsPerformed(dtp_config, dtp_api, args.force_update)
+    as_performed = CreateAsPerformed(dtp_config, dtp_api, args.force_update, args.simulation)
     count_created_nodes = as_performed.create_as_performed_nodes()
     for key, item in count_created_nodes.items():
         print(f"{key}: {item}")

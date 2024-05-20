@@ -71,7 +71,7 @@ def check_schedule(activity_start_time, activity_end_time, operation_start_time,
         Start time for operation
     operation_end_time: datetime.datetime, obligatory
         End time for operation
-    activity_progress: str, obligatory
+    activity_progress: int, obligatory
         Progress of an element in operation
 
     Returns
@@ -244,6 +244,8 @@ class ProgressMonitor:
         operations = self.DTP_API.query_all_pages(self.DTP_API.fetch_op_nodes)
         assert operations['size'], "No operation nodes found!"
         for operation in operations['items']:
+            if self.DTP_CONFIG.get_ontology_uri('lastUpdatedOn') not in operation:
+                continue
             last_updated = operation[self.DTP_CONFIG.get_ontology_uri('lastUpdatedOn')]
             if not scan_date:  # if scan date is not set
                 scan_date = last_updated
@@ -347,12 +349,15 @@ class ProgressMonitor:
             tasks = self.DTP_API.query_all_pages(self.DTP_API.fetch_activity_connected_task_nodes,
                                                  each_activity['_iri'])
             for each_task in tasks['items']:
-                as_planned_element = self.DTP_API.fetch_elements_connected_task_nodes(each_task['_iri'])
-                as_performed_element = self.__get_as_performed_element(as_planned_element)
-                if not as_performed_element['size']:  # if as-planned node doesn't have an as-performed node
-                    continue
+                # assume as-built exist when you find action nodes, not checking as-built node
+                # as_planned_element = self.DTP_API.fetch_elements_connected_task_nodes(each_task['_iri'])
+                # as_performed_element = self.__get_as_performed_element(as_planned_element)
+                # if not as_performed_element['size']:  # if as-planned node doesn't have an as-performed node
+                #     continue
+                # as_performed_status = self.__get_progress_from_as_built_node(as_performed_element)
 
-                as_performed_status = self.__get_progress_from_as_built_node(as_performed_element)
+                # work around as we assume as-built exist when you find action nodes
+                as_performed_status = 100
                 time_status, days, task_complete_flag = check_schedule(activity_start_time, activity_end_time,
                                                                        operation_start_time, operation_end_time,
                                                                        as_performed_status)
@@ -444,5 +449,3 @@ if __name__ == "__main__":
     dtp_api = DTPApi(dtp_config, simulation_mode=args.simulation)
     progress_monitor = ProgressMonitor(dtp_config, dtp_api, args.kpis)
     progress_dict = progress_monitor.compute_progress_at_activity()
-    # for activity_iri, progress in progress_dict.items():
-    #     print(activity_iri, progress)

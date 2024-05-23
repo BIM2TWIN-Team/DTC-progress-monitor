@@ -304,7 +304,7 @@ class ProgressMonitor:
             print("Completed fetching all activity nodes from DTP.")
         activity_tracker = dict()
         progress_at_activity = dict()
-        latest_scan_date = self.__get_scan_date()
+        self.current_date = latest_scan_date = self.__get_scan_date()
 
         print("Started progress monitering...")
         for each_activity in tqdm(activities['items']):
@@ -408,11 +408,18 @@ class ProgressMonitor:
             behind_days = 0
             total_days = 0
             behind_activity_list = []
+            precondition_wp = True if open('precondition_record.txt', 'r').read().find(f"{wp_iri}") > -1 else False
+
             for activity in activity_list:
 
-                total_days += (activity['operation_end_time'] - activity['activity_start_time']).days  # total
+                current_date = self.current_date if self.current_date > activity['operation_end_time'] \
+                    else activity['operation_end_time']
+                if precondition_wp:
+                    current_date = activity['operation_end_time']
+
+                total_days += (current_date - activity['activity_start_time']).days  # total
                 # total_days += (activity['activity_end_time'] - activity['activity_start_time']).days  # planned
-                behind_days_check = (activity['operation_end_time'] - activity['activity_end_time']).days
+                behind_days_check = (current_date - activity['activity_end_time']).days
                 if behind_days_check > 0:
                     behind_days += behind_days_check
                     behind_activity_list += [1]

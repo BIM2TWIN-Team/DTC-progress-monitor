@@ -391,13 +391,12 @@ class CreateAsPerformed:
                 condition += (has_action_edge == list_of_action_iri,)
             if last_updated:
                 condition += (node_last_updated == last_updated,)
-            if process_end:
+            if process_end and node_end:  # make sure both has valid values
                 condition += (node_end == process_end,)
 
             if all(condition):
                 return operation_iri, False
             else:
-                print(node_last_updated, last_updated)
                 create_res = self.DTP_API.update_operation_node(operation_iri, classification_code,
                                                                 classification_system,
                                                                 activity['_iri'], list_of_action_iri, process_start,
